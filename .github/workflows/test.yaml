@@ -37,7 +37,7 @@ jobs:
         with:
           version: ${{ env.PNPM_VERSION }}
       - name: Install with pnpm
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
       - name: Run tests with coverage
         run: pnpm test:coverage
       - name: Coveralls

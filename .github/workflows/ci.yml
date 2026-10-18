@@ -68,7 +68,7 @@ jobs:
         with:
           version: ${{ env.PNPM_VERSION }}
       - name: Install with pnpm
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
       - name: Lint code
         run: pnpm lint
       - name: Build

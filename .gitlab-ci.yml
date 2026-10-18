@@ -1,0 +1,82 @@
+# GitLab CI: mirrors the checks of .github/workflows/ci.yml and test.yaml.
+# Release, Docker publishing and security scans stay on GitHub Actions.
+stages:
+  - check
+  - test
+  - docker
+
+default:
+  image: node:24
+  interruptible: true
+
+variables:
+  PNPM_VERSION: "10.33.0"
+  PNPM_STORE_DIR: "$CI_PROJECT_DIR/.pnpm-store"
+  HUSKY: "0"
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+.pnpm:
+  cache:
+    key:
+      files:
+        - pnpm-lock.yaml
+    paths:
+      - .pnpm-store
+  before_script:
+    - corepack enable
+    - corepack prepare "pnpm@${PNPM_VERSION}" --activate
+    - pnpm config set store-dir "$PNPM_STORE_DIR"
+    - pnpm install --frozen-lockfile
+
+commitlint:
+  extends: .pnpm
+  stage: check
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - |
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ]; then
+        pnpm exec commitlint --config commitlint.config.cjs --from "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --to "$CI_COMMIT_SHA"
+      else
+        pnpm exec commitlint --config commitlint.config.cjs --last
+      fi
+  allow_failure: true
+
+build:
+  extends: .pnpm
+  stage: check
+  parallel:
+    matrix:
+      - NODE_VERSION: ["20", "22", "24"]
+  image: node:${NODE_VERSION}
+  script:
+    - pnpm lint
+    - pnpm build
+
+test:
+  extends: .pnpm
+  stage: test
+  script:
+    - pnpm test:coverage
+  coverage: '/^All files\s*\|\s*([\d.]+)/'
+  artifacts:
+    when: always
+    paths:
+      - coverage/lcov.info
+
+docker-build:
+  stage: docker
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  script:
+    - VERSION=$(grep -m1 '"version"' package.json | sed -E 's/.*"([0-9][^"]*)".*/\1/')
+    - docker build --build-arg PACKAGE_VERSION="$VERSION" -t turborepo-remote-cache:test .
+    - docker inspect turborepo-remote-cache:test
